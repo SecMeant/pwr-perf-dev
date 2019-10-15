@@ -20,16 +20,16 @@ auto make_array(Ts&&... args){
   return std::array<T, sizeof...(args)>({static_cast<T>(args)...});
 }
 
-auto OBEX_CONNECT_PAYLOAD = make_array<char>( 0x80, 0x0,  0x15, 0x10, 0x0,
-                                       0x02, 0x0,  0x46, 0x0,  0x0e,
-                                       0x53, 0x59, 0x4e, 0x43, 0x4d,
-                                       0x4c, 0x2d, 0x44, 0x4d );
+auto OBEX_CONNECT_PAYLOAD = make_array<char>( 0x80, 0x00, 0x07, 0x10, 0x00, 0x20, 0x00 );
+auto OBEX_DISCONNECT_PAYLOAD = make_array<char>(0x81, 0x00, 0x03);
 
 auto OBEX_CONNECT_FTP_PAYLOAD = make_array<char>( 0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C,
                                    0x11, 0xD2, 0x98, 0x4E, 0x52, 0x54,
                                    0x00, 0xDC, 0x9E, 0x09 );
 
-auto OBEX_PUT_PAYLOAD = make_array<char>( 0x82, 0x0, 0x7, 0x10, 0x0, 0x0, 0x0 );
+auto OBEX_PUT_PAYLOAD = make_array<char>( 0x02 );
+
+auto RFCOMM_UUID = make_array<char>(0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB);
 
 vector<BLUETOOTH_DEVICE_INFO>
 scanDevices()
@@ -93,9 +93,9 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
 
   // Scan all ports -- bthapis feature doesnt seem to work, doing it
   // manually.
-  constexpr int min_port = 0;
+  constexpr int min_port = 4;
   constexpr int max_port = 30;
-  auto port = min_port;
+  auto port = 12;
   while (port <= max_port) {
     printf(
       "Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr, port);
@@ -108,6 +108,7 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
       break;
 
     ++port;
+    break;
   }
 
   if (port > max_port) {
@@ -126,7 +127,7 @@ int
 obex_connect(SOCKET s)
 {
   printf("Sending msg\n");
-  int send_len = SEND_ARRAY(s, OBEX_CONNECT_FTP_PAYLOAD);
+  int send_len = SEND_ARRAY(s, OBEX_CONNECT_PAYLOAD);
   if (send_len == SOCKET_ERROR) {
     printf("send failed with error: %d\n", WSAGetLastError());
     closesocket(s);
@@ -134,8 +135,8 @@ obex_connect(SOCKET s)
   }
 
   // printf("Sending msg\n");
-  // send_len = send( s, OBEX_PUT_PAYLOAD, sizeof(OBEX_CONNECT_PAYLOAD), 0
-  // ); if ( send_len == SOCKET_ERROR) {
+  // send_len = SEND_ARRAY(s, OBEX_PUT_PAYLOAD);
+  // if ( send_len == SOCKET_ERROR) {
   //     printf("send failed with error: %d\n", WSAGetLastError());
   //     closesocket(s);
   //     return 1;
@@ -143,8 +144,8 @@ obex_connect(SOCKET s)
 
   printf("send len %i\n", send_len);
   printf("recv\n");
-  char buff[6];
-  int rec_len = recv(s, buff, 6, MSG_WAITALL);
+  char buff[256];
+  int rec_len = recv(s, buff, 256, 0);
   if (rec_len == SOCKET_ERROR) {
     printf("recv failed with error: %d\n", WSAGetLastError());
     closesocket(s);
@@ -155,6 +156,45 @@ obex_connect(SOCKET s)
   for (int i = 0; i < rec_len; i++) {
     printf("%hhx ", buff[i]);
   }
+  puts("");
+
+  return 0;
+}
+
+int
+obex_disconnect(SOCKET s)
+{
+  printf("Sending disconnect\n");
+  int send_len = SEND_ARRAY(s, OBEX_DISCONNECT_PAYLOAD);
+  if (send_len == SOCKET_ERROR) {
+    printf("send failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return 1;
+  }
+
+  // printf("Sending msg\n");
+  // send_len = SEND_ARRAY(s, OBEX_PUT_PAYLOAD);
+  // if ( send_len == SOCKET_ERROR) {
+  //     printf("send failed with error: %d\n", WSAGetLastError());
+  //     closesocket(s);
+  //     return 1;
+  // }
+
+  printf("send len %i\n", send_len);
+  printf("recv\n");
+  char buff[256];
+  int rec_len = recv(s, buff, 256, 0);
+  if (rec_len == SOCKET_ERROR) {
+    printf("recv failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return 1;
+  }
+
+  printf("recv  data %i \n", rec_len);
+  for (int i = 0; i < rec_len; i++) {
+    printf("%hhx ", buff[i]);
+  }
+  puts("");
 
   return 0;
 }
@@ -196,6 +236,7 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
   return 1;
 }
 
+
 int
 _tmain(int argc, _TCHAR *argv[])
 {
@@ -235,5 +276,6 @@ _tmain(int argc, _TCHAR *argv[])
 
   auto sock = bth_connect(pd);
   obex_connect(sock);
+  obex_disconnect(sock);
   return 0;
 }
