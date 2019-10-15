@@ -1,31 +1,35 @@
-#include "bthdef.h"
-#include <BluetoothAPIs.h>
+#include <tchar.h>
+#include <string>
+#include <iostream>
+#include <vector>
 #include <Winsock2.h>
 #include <Ws2bth.h>
-#include <array>
-#include <initguid.h>
-#include <intsafe.h>
-#include <iostream>
-#include <limits>
+#include <BluetoothAPIs.h>
+#include "bthdef.h"
 #include <stdio.h>
-#include <string>
-#include <strsafe.h>
-#include <tchar.h>
-#include <vector>
+#include <initguid.h>
 #include <winsock2.h>
 #include <ws2bth.h>
+#include <strsafe.h>
+#include <intsafe.h>
+#include <array>
 
 using namespace std;
-std::array<char> OBEX_CONNECT_PAYLOAD{ 0x80, 0x0,  0x15, 0x10, 0x0,
+template<typename T, typename ...Ts>
+auto make_array(Ts&&... args){
+  return std::array<T, sizeof...(args)>({static_cast<T>(args)...});
+}
+
+auto OBEX_CONNECT_PAYLOAD = make_array<char>( 0x80, 0x0,  0x15, 0x10, 0x0,
                                        0x02, 0x0,  0x46, 0x0,  0x0e,
                                        0x53, 0x59, 0x4e, 0x43, 0x4d,
-                                       0x4c, 0x2d, 0x44, 0x4d };
+                                       0x4c, 0x2d, 0x44, 0x4d );
 
-std::array<char> OBEX_CONNECT_FTP_PAYLOAD { 0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C,
+auto OBEX_CONNECT_FTP_PAYLOAD = make_array<char>( 0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C,
                                    0x11, 0xD2, 0x98, 0x4E, 0x52, 0x54,
-                                   0x00, 0xDC, 0x9E, 0x09 };
+                                   0x00, 0xDC, 0x9E, 0x09 );
 
-std::array<char> OBEX_PUT_PAYLOAD{ 0x82, 0x0, 0x7, 0x10, 0x0, 0x0, 0x0 };
+auto OBEX_PUT_PAYLOAD = make_array<char>( 0x82, 0x0, 0x7, 0x10, 0x0, 0x0, 0x0 );
 
 vector<BLUETOOTH_DEVICE_INFO>
 scanDevices()
@@ -115,12 +119,14 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
   return s;
 }
 
+#define SEND_ARRAY(sock, arr) \
+  send(sock, arr.data(), arr.size(), 0)
+
 int
 obex_connect(SOCKET s)
 {
   printf("Sending msg\n");
-  int send_len =
-    send(s, OBEX_CONNECT_FTP_PAYLOAD, OBEX_CONNECT_FTP_PAYLOAD.size(), 0);
+  int send_len = SEND_ARRAY(s, OBEX_CONNECT_FTP_PAYLOAD);
   if (send_len == SOCKET_ERROR) {
     printf("send failed with error: %d\n", WSAGetLastError());
     closesocket(s);
@@ -165,7 +171,7 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
     NULL);
   if (result != ERROR_SUCCESS) {
     puts("Failed to register callback");
-    return;
+    return 1;
   }
   result = BluetoothAuthenticateDeviceEx(
     NULL, NULL, &device, NULL, MITMProtectionNotRequired);
@@ -216,19 +222,18 @@ _tmain(int argc, _TCHAR *argv[])
   uint32_t devid;
   if (scanf(" %i", &devid) != 1 || devid >= devices.size()) {
     cout << "Wrong device number\n";
-    goto failed;
+    WSACleanup();
+    return 1;
   }
 
   auto pd = devices[devid];
   cout << "Device pairing...\n";
-  if (pairDevice(pd))
-    goto failed;
+  if (pairDevice(pd)) {
+    WSACleanup();
+    return 1;
+  }
 
-  auto sock = bth_connect(device);
+  auto sock = bth_connect(pd);
   obex_connect(sock);
   return 0;
-
-failed:
-  WSACleanup();
-  return 1;
 }
