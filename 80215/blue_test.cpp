@@ -2,6 +2,7 @@
 #include <BluetoothAPIs.h>
 #include <Winsock2.h>
 #include <Ws2bth.h>
+#include <array>
 #include <initguid.h>
 #include <intsafe.h>
 #include <iostream>
@@ -15,12 +16,20 @@
 #include <ws2bth.h>
 
 using namespace std;
-const char OBEX_CONNECT_PAYLOAD[] = {0x80, 0x0,  0x15, 0x10, 0x0,  0x02, 0x0,
-                                     0x46, 0x0,  0x0e, 0x53, 0x59, 0x4e, 0x43,
-                                     0x4d, 0x4c, 0x2d, 0x44, 0x4d};
-const char OBEX_PUT_PAYLOAD[] = {0x82, 0x0, 0x7, 0x10, 0x0, 0x0, 0x0};
+std::array<char> OBEX_CONNECT_PAYLOAD{ 0x80, 0x0,  0x15, 0x10, 0x0,
+                                       0x02, 0x0,  0x46, 0x0,  0x0e,
+                                       0x53, 0x59, 0x4e, 0x43, 0x4d,
+                                       0x4c, 0x2d, 0x44, 0x4d };
 
-vector<BLUETOOTH_DEVICE_INFO> scanDevices() {
+std::array<char> OBEX_CONNECT_FTP_PAYLOAD { 0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C,
+                                   0x11, 0xD2, 0x98, 0x4E, 0x52, 0x54,
+                                   0x00, 0xDC, 0x9E, 0x09 };
+
+std::array<char> OBEX_PUT_PAYLOAD{ 0x82, 0x0, 0x7, 0x10, 0x0, 0x0, 0x0 };
+
+vector<BLUETOOTH_DEVICE_INFO>
+scanDevices()
+{
   vector<BLUETOOTH_DEVICE_INFO> res;
 
   BLUETOOTH_DEVICE_SEARCH_PARAMS bdsp;
@@ -47,19 +56,24 @@ vector<BLUETOOTH_DEVICE_INFO> scanDevices() {
   return res;
 }
 
-BOOL CALLBACK bluetoothAuthCallback(
-    LPVOID param, PBLUETOOTH_AUTHENTICATION_CALLBACK_PARAMS params) {
+BOOL CALLBACK
+bluetoothAuthCallback(LPVOID param,
+                      PBLUETOOTH_AUTHENTICATION_CALLBACK_PARAMS params)
+{
   BLUETOOTH_AUTHENTICATE_RESPONSE response;
 
   ::ZeroMemory(&response, sizeof(BLUETOOTH_AUTHENTICATE_RESPONSE));
   response.authMethod = params->authenticationMethod;
   response.bthAddressRemote = params->deviceInfo.Address;
   response.negativeResponse = FALSE;
-  DWORD error = ::BluetoothSendAuthenticationResponseEx(nullptr, &response);
+  DWORD error =
+    ::BluetoothSendAuthenticationResponseEx(nullptr, &response);
   return error == ERROR_SUCCESS;
 }
 
-SOCKET bth_connect(BLUETOOTH_DEVICE_INFO &device) {
+SOCKET
+bth_connect(BLUETOOTH_DEVICE_INFO &device)
+{
   auto s = ::socket(AF_BTH, SOCK_STREAM, BTHPROTO_RFCOMM);
   SOCKADDR_BTH SockAddrBthServer;
 
@@ -73,17 +87,20 @@ SOCKET bth_connect(BLUETOOTH_DEVICE_INFO &device) {
 
   printf("socket() looks fine!\n");
 
-  // Scan all ports -- bthapis feature doesnt seem to work, doing it manually.
+  // Scan all ports -- bthapis feature doesnt seem to work, doing it
+  // manually.
   constexpr int min_port = 0;
   constexpr int max_port = 30;
   auto port = min_port;
   while (port <= max_port) {
-    printf("Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr, port);
+    printf(
+      "Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr, port);
 
     SockAddrBthServer.port = port;
 
-    if (::connect(s, (SOCKADDR *)&SockAddrBthServer, sizeof(SOCKADDR_BTH)) !=
-        SOCKET_ERROR)
+    if (::connect(s,
+                  (SOCKADDR *)&SockAddrBthServer,
+                  sizeof(SOCKADDR_BTH)) != SOCKET_ERROR)
       break;
 
     ++port;
@@ -94,14 +111,16 @@ SOCKET bth_connect(BLUETOOTH_DEVICE_INFO &device) {
     ::closesocket(s);
     return INVALID_SOCKET;
   }
-  
+
   return s;
 }
 
-int obex_connect(SOCKET s)
+int
+obex_connect(SOCKET s)
 {
   printf("Sending msg\n");
-  int send_len = send(s, OBEX_CONNECT_PAYLOAD, sizeof(OBEX_CONNECT_PAYLOAD), 0);
+  int send_len =
+    send(s, OBEX_CONNECT_FTP_PAYLOAD, OBEX_CONNECT_FTP_PAYLOAD.size(), 0);
   if (send_len == SOCKET_ERROR) {
     printf("send failed with error: %d\n", WSAGetLastError());
     closesocket(s);
@@ -109,8 +128,8 @@ int obex_connect(SOCKET s)
   }
 
   // printf("Sending msg\n");
-  // send_len = send( s, OBEX_PUT_PAYLOAD, sizeof(OBEX_CONNECT_PAYLOAD), 0 );
-  // if ( send_len == SOCKET_ERROR) {
+  // send_len = send( s, OBEX_PUT_PAYLOAD, sizeof(OBEX_CONNECT_PAYLOAD), 0
+  // ); if ( send_len == SOCKET_ERROR) {
   //     printf("send failed with error: %d\n", WSAGetLastError());
   //     closesocket(s);
   //     return 1;
@@ -118,8 +137,8 @@ int obex_connect(SOCKET s)
 
   printf("send len %i\n", send_len);
   printf("recv\n");
-  char buff[256];
-  int rec_len = recv(s, buff, 256, MSG_WAITALL);
+  char buff[6];
+  int rec_len = recv(s, buff, 6, MSG_WAITALL);
   if (rec_len == SOCKET_ERROR) {
     printf("recv failed with error: %d\n", WSAGetLastError());
     closesocket(s);
@@ -134,44 +153,51 @@ int obex_connect(SOCKET s)
   return 0;
 }
 
-int pairDevice(BLUETOOTH_DEVICE_INFO &device) {
+int
+pairDevice(BLUETOOTH_DEVICE_INFO &device)
+{
 
   HBLUETOOTH_AUTHENTICATION_REGISTRATION hCallbackHandle = 0;
   DWORD result = BluetoothRegisterForAuthenticationEx(
-      &device, &hCallbackHandle,
-      (PFN_AUTHENTICATION_CALLBACK_EX)&bluetoothAuthCallback, NULL);
+    &device,
+    &hCallbackHandle,
+    (PFN_AUTHENTICATION_CALLBACK_EX)&bluetoothAuthCallback,
+    NULL);
   if (result != ERROR_SUCCESS) {
     puts("Failed to register callback");
     return;
   }
-  result = BluetoothAuthenticateDeviceEx(NULL, NULL, &device, NULL,
-                                         MITMProtectionNotRequired);
+  result = BluetoothAuthenticateDeviceEx(
+    NULL, NULL, &device, NULL, MITMProtectionNotRequired);
 
   BluetoothUnregisterAuthentication(hCallbackHandle);
   switch (result) {
-  case ERROR_SUCCESS:
-  case ERROR_NO_MORE_ITEMS:
-    puts("pair device success");
-    return 0;
-  case ERROR_CANCELLED:
-    puts("pair device failed, user cancelled");
-    break;
-  case ERROR_INVALID_PARAMETER:
-    puts("pair device failed, invalid parameter");
-    break;
-  default:
-    printf("pair device failed, unknown error, code %u\n", result);
-    break;
+    case ERROR_SUCCESS:
+    case ERROR_NO_MORE_ITEMS:
+      puts("pair device success");
+      return 0;
+    case ERROR_CANCELLED:
+      puts("pair device failed, user cancelled");
+      break;
+    case ERROR_INVALID_PARAMETER:
+      puts("pair device failed, invalid parameter");
+      break;
+    default:
+      printf("pair device failed, unknown error, code %u\n", result);
+      break;
   }
 
   return 1;
 }
 
-int _tmain(int argc, _TCHAR *argv[]) {
+int
+_tmain(int argc, _TCHAR *argv[])
+{
   WSADATA wsaData;
 
   if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-    printf("Unable to load Winsock! Error code is %d\n", WSAGetLastError());
+    printf("Unable to load Winsock! Error code is %d\n",
+           WSAGetLastError());
     return 1;
   }
 
@@ -195,7 +221,7 @@ int _tmain(int argc, _TCHAR *argv[]) {
 
   auto pd = devices[devid];
   cout << "Device pairing...\n";
-  if(pairDevice(pd))
+  if (pairDevice(pd))
     goto failed;
 
   auto sock = bth_connect(device);
