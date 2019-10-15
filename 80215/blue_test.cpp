@@ -196,6 +196,54 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
   return 1;
 }
 
+#define MAX_NAME 248
+static BOOL PerformInquiry() 
+{
+  WSAQUERYSET wsaq;
+  HANDLE hLookup;
+  union {
+    CHAR buf[5000];
+    double __unused; // ensure proper alignment
+  };
+  LPWSAQUERYSET pwsaResults = (LPWSAQUERYSET) buf;
+  DWORD dwSize  = sizeof(buf);
+  BOOL bHaveName;
+  ZeroMemory(&wsaq, sizeof(wsaq));
+  wsaq.dwSize = sizeof(wsaq);
+  wsaq.dwNameSpace = NS_BTH;
+  wsaq.lpcsaBuffer = NULL;
+  if (ERROR_SUCCESS != WSALookupServiceBegin (&wsaq, LUP_CONTAINERS, &hLookup))
+  {
+    wprintf(L"WSALookupServiceBegin failed %d\r\n", GetLastError());
+    return FALSE;
+  }
+
+  ZeroMemory(pwsaResults, sizeof(WSAQUERYSET));
+  pwsaResults->dwSize = sizeof(WSAQUERYSET);
+  pwsaResults->dwNameSpace = NS_BTH;
+  pwsaResults->lpBlob = NULL;
+  while (ERROR_SUCCESS == WSALookupServiceNext (hLookup, LUP_RETURN_NAME | LUP_RETURN_ADDR, &dwSize, pwsaResults))
+  {
+    BTH_ADDR  b = ((SOCKADDR_BTH *)pwsaResults->lpcsaBuffer->RemoteAddr.lpSockaddr)->btAddr;
+    bHaveName = pwsaResults->lpszServiceInstanceName && *(pwsaResults->lpszServiceInstanceName);
+    wprintf (L"%s%s%04x%08x%s\n", bHaveName ? pwsaResults->lpszServiceInstanceName : "", 
+    bHaveName ? L"(" : L"", GET_NAP(b), GET_SAP(b), bHaveName ? L")" : L"");
+
+    GUID guid;
+    CoCreateGuid(&guid);
+    
+    OLECHAR* guidString;
+    StringFromCLSID(*pwsaResults->lpServiceClassId, &guidString);
+
+
+    wprintf(L"%x", guidString);
+
+    ::CoTaskMemFree(guidString);
+  }
+  WSALookupServiceEnd(hLookup);
+  return TRUE;
+}
+
 int
 _tmain(int argc, _TCHAR *argv[])
 {
@@ -206,6 +254,7 @@ _tmain(int argc, _TCHAR *argv[])
            WSAGetLastError());
     return 1;
   }
+  PerformInquiry();
 
   puts("WSAStartup() is OK, Winsock lib loaded!");
 

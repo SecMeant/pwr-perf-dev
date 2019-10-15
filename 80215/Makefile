@@ -7,7 +7,7 @@ else
 endif
 
 all:
-	$(CC) blue_test.cpp -lws2_32 -lBthprops
+	$(CC) blue_test.cpp -lws2_32 -lBthprops -lOle32
 
 clean:
 	$(RM) *.obj *.exe
