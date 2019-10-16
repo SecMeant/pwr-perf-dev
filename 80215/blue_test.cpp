@@ -242,23 +242,24 @@ public:
 
     std::stringstream ss;
 
-    ss << static_cast<char>(0x82); // FINAL
+    using uchar = unsigned char;
+    ss << static_cast<uchar>(0x82); // FINAL
     ss << serialize(total_size);
-    ss << static_cast<char>(0x01);
+    ss << static_cast<uchar>(0x01);
     ss << serialize(static_cast<uint16_t>(filename.size()+1));
     ss << filename;
-    ss << static_cast<char>(0x00);
-    ss << static_cast<char>(0xC3);
+    ss << static_cast<uchar>(0x00);
+    ss << static_cast<uchar>(0xC3);
     ss << serialize(static_cast<uint32_t>(fileSize));
-    ss << static_cast<char>(0x48);
+    ss << static_cast<uchar>(0x48);
     ss << serialize(static_cast<uint32_t>(fileSize));
-    std::copy(std::istream_iterator<char>(file),
-              std::istream_iterator<char>(),
-              std::ostream_iterator<char>(ss));
+    std::copy(std::istream_iterator<uchar>(file),
+              std::istream_iterator<uchar>(),
+              std::ostream_iterator<uchar>(ss));
 
 
-    std::copy(std::istream_iterator<char>(ss),
-              std::istream_iterator<char>(),
+    std::copy(std::istream_iterator<uchar>(ss),
+              std::istream_iterator<uchar>(),
               std::ostream_iterator<uint32_t>(ofile, ", "));
     //SEND_ARRAY(this->sock, ss.str());
 
