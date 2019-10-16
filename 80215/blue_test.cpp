@@ -224,12 +224,12 @@ public:
       return 1;
     }
 
-    std::ifstream file(filename);
+    std::ifstream file(filename.data());
 
     if (!file.is_open())
       return 1;
 
-    size_t fileSize = fs::file_size(filename.data());
+    size_t fileSize = fs::file_size(filename);
     size_t packSize = this->connInfo.maxPacketSize;
     uint16_t total_size = 6 + filename.size() + 1 + 8 + fileSize;
 
