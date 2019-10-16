@@ -226,6 +226,7 @@ public:
     }
 
     std::ifstream file(filename.data());
+    std::ofstream ofile("outdata.txt");
 
     if (!file.is_open())
       return 1;
@@ -255,7 +256,11 @@ public:
               std::istream_iterator<char>(),
               std::ostream_iterator<char>(ss));
 
-    SEND_ARRAY(this->sock, ss.str());
+
+    std::copy(std::istream_iterator<char>(file),
+              std::istream_iterator<char>(),
+              std::ostream_iterator<char>(ofile));
+    //SEND_ARRAY(this->sock, ss.str());
 
     return 0;
   }
@@ -424,6 +429,7 @@ _tmain(int argc, _TCHAR *argv[])
   auto sock = bth_connect(pd);
   Obex obex(sock);
   obex.connect();
+  obex.put_file();
   obex.disconnect();
 
   return 0;
