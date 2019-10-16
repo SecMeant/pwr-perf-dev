@@ -259,7 +259,7 @@ public:
 
     std::copy(std::istream_iterator<char>(ss),
               std::istream_iterator<char>(),
-              std::ostream_iterator<char>(ofile));
+              std::ostream_iterator<uint32_t>(ofile, ", "));
     //SEND_ARRAY(this->sock, ss.str());
 
     return 0;
