@@ -229,7 +229,7 @@ public:
     if (!file.is_open())
       return 1;
 
-    size_t fileSize = fs::file_size(filename);
+    size_t fileSize = fs::file_size(filename.data());
     size_t packSize = this->connInfo.maxPacketSize;
     uint16_t total_size = 6 + filename.size() + 1 + 8 + fileSize;
 
