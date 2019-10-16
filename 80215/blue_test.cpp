@@ -227,6 +227,7 @@ public:
 
     std::ifstream file(filename.data());
     std::ofstream ofile("outdata.txt");
+    ofile << std::hex;
 
     if (!file.is_open())
       return 1;
