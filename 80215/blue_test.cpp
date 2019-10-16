@@ -17,10 +17,15 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <string_view>
+#include <iterator>
+#include <algorithm>
 
 #define OBEX_CONV_SIZE(size) __builtin_bswap16(size)
 #define OBEX_SIZE_HIGH(size) (size >> 4)
 #define OBEX_SIZE_LOW(size) (size & 0xff)
+
+#define SEND_ARRAY(sock, arr) send(sock, arr.data(), arr.size(), 0)
 
 constexpr uint16_t
 OBEX_PACK_SIZE(uint8_t sh, uint8_t sl)
@@ -40,20 +45,11 @@ make_array(Ts &&... args)
   return std::array<T, sizeof...(args)>({ static_cast<T>(args)... });
 }
 
-constexpr auto
-OBEX_MARK_FINAL(auto&& array)
+template<typename ContaierType>
+constexpr void
+OBEX_MARK_FINAL(ContainerType&& array)
 {
   array[0] |= 0x80;
-}
-
-template<typename ContainerType>
-constexpr std::vector<char>
-OBEX_PREPARE_PUT_PAYLOAD(ContainerType&& container)
-{
-  std::vector<char> data(container.size() + 3);
-  
-  data[0] = OBEX_PAYLOAD_PUT_CODE;
-  data[1]
 }
 
 auto OBEX_CONNECT_PAYLOAD = make_array<char>(
@@ -181,9 +177,9 @@ class Obex
   std::vector<char> sendBuffer;
 
 public:
-  Obex() noexcept : s(INVALID_SOCKET) {}
+  Obex() noexcept : sock(INVALID_SOCKET) {}
 
-  Obex(SOCKET s) noexcept : s(INVALID_SOCKET) {}
+  Obex(SOCKET s) noexcept : sock(s) {}
 
   ~Obex() { this->disconnect(); }
 
@@ -206,7 +202,7 @@ public:
   disconnect() noexcept
   {
     if (this->sock == INVALID_SOCKET)
-      returm;
+      return;
 
     obex_disconnect(this->sock);
   }
@@ -366,8 +362,6 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
 
   return s;
 }
-
-#define SEND_ARRAY(sock, arr) send(sock, arr.data(), arr.size(), 0)
 
 int
 pairDevice(BLUETOOTH_DEVICE_INFO &device)
