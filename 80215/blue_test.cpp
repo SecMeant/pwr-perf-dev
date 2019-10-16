@@ -252,7 +252,7 @@ public:
     ss << filename;
     ss << static_cast<uchar>(0x00);
     ss << static_cast<uchar>(0xC3);
-    ss << serialize(static_cast<uint32_t>(fileSize));
+    ss << serialize(static_cast<uint64_t>(fileSize));
     ss << static_cast<uchar>(0x48);
     ss << serialize(static_cast<uint32_t>(fileSize));
     std::copy(std::istream_iterator<uchar>(file),
