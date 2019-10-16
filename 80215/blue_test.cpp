@@ -205,7 +205,7 @@ public:
       return;
 
     obex_disconnect(this->sock);
-    this->sock = INVALID_SOCKET
+    this->sock = INVALID_SOCKET;
   }
 
   template<typename IntegralType>
