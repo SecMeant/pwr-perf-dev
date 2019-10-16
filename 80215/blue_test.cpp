@@ -18,9 +18,7 @@
 #include <vector>
 #include <sstream>
 
-#include <byteswap.h>
-
-#define OBEX_CONV_SIZE(size) __bswap_16(size)
+#define OBEX_CONV_SIZE(size) __builtin_bswap16(size)
 #define OBEX_SIZE_HIGH(size) (size >> 4)
 #define OBEX_SIZE_LOW(size) (size & 0xff)
 
