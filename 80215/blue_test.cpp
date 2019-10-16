@@ -1,13 +1,13 @@
-#include "bthdef.h"
-#include <BluetoothAPIs.h>
+#include <tchar.h>
 #include <Winsock2.h>
 #include <Ws2bth.h>
+#include <BluetoothAPIs.h>
+#include "bthdef.h"
 #include <initguid.h>
-#include <intsafe.h>
-#include <strsafe.h>
-#include <tchar.h>
 #include <winsock2.h>
 #include <ws2bth.h>
+#include <strsafe.h>
+#include <intsafe.h>
 
 #include <array>
 #include <cstdio>
