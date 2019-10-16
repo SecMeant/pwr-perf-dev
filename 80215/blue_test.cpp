@@ -205,6 +205,7 @@ public:
       return;
 
     obex_disconnect(this->sock);
+    this->sock = INVALID_SOCKET
   }
 
   template<typename IntegralType>
@@ -258,17 +259,6 @@ public:
 
     return 0;
   }
-
-private:
-
-  uint16_t preparePutBuffer(std::string_view filename, size_t file_size) noexcept
-  {
-    uint16_t size = this->connInfo.maxPacketSize;
-    this->sendBuffer[0] = 0x02;
-    this->sendBuffer[1] = size >> 4;
-    this->sendBuffer[2] = size & 0xff;
-  }
-
 };
 
 vector<BLUETOOTH_DEVICE_INFO>
