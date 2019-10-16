@@ -11,15 +11,26 @@
 
 #include <array>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include <sstream>
 
 #include <byteswap.h>
 
 #define OBEX_CONV_SIZE(size) __bswap_16(size)
 #define OBEX_SIZE_HIGH(size) (size >> 4)
 #define OBEX_SIZE_LOW(size) (size & 0xff)
+
+constexpr uint16_t
+OBEX_PACK_SIZE(uint8_t sh, uint8_t sl)
+{
+  return (static_cast<uint16_t>(sh) << 4) | sl;
+}
+
+constexpr uint8_t OBEX_PAYLOAD_PUT_CODE = 0x02;
 constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(0x00ff);
 constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
 
@@ -31,6 +42,22 @@ make_array(Ts &&... args)
   return std::array<T, sizeof...(args)>({ static_cast<T>(args)... });
 }
 
+constexpr auto
+OBEX_MARK_FINAL(auto&& array)
+{
+  array[0] |= 0x80;
+}
+
+template<typename ContainerType>
+constexpr std::vector<char>
+OBEX_PREPARE_PUT_PAYLOAD(ContainerType&& container)
+{
+  std::vector<char> data(container.size() + 3);
+  
+  data[0] = OBEX_PAYLOAD_PUT_CODE;
+  data[1]
+}
+
 auto OBEX_CONNECT_PAYLOAD = make_array<char>(
   0x80, 0x00, 0x07, 0x10, 0x00, OBEX_SIZE_HIGH(OBEX_MAX_PACKET_SIZE),
   OBEX_SIZE_LOW(OBEX_MAX_PACKET_SIZE));
@@ -40,7 +67,8 @@ auto OBEX_CONNECT_FTP_PAYLOAD =
   make_array<char>(0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C, 0x11, 0xD2, 0x98,
                    0x4E, 0x52, 0x54, 0x00, 0xDC, 0x9E, 0x09);
 
-auto OBEX_PUT_PAYLOAD = make_array<char>(0x02);
+auto OBEX_END_OF_PUT_PAYLOAD =
+  make_array<char>(0x82, 0x04, 0x06, 0x49, 0x04, 0x03);
 
 auto RFCOMM_UUID =
   make_array<char>(0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80,
@@ -82,6 +110,7 @@ obex_fetch_resp(SOCKET s)
   return ret;
 }
 
+// TODO reject packets that declare max_packet_size < 3
 int
 obex_connect(SOCKET s, ObexConnResp &resp)
 {
@@ -123,22 +152,35 @@ obex_disconnect(SOCKET s)
   if (resp.code == OBEX_ERROR_RESP) {
     printf("recv failed with error: %d\n", WSAGetLastError());
     closesocket(s);
-    return 1;
+    return;
   }
 
   resp.debug_show();
   closesocket(s);
 }
 
+int
+obex_end_of_put(SOCKET s)
+{
+  int send_len = SEND_ARRAY(s, OBEX_END_OF_PUT_PAYLOAD);
+  if (send_len == SOCKET_ERROR) {
+    printf("send failed with error: %d\n", WSAGetLastError());
+    return -1;
+  }
+
+  return 0;
+}
+
 class Obex
 {
   struct ConnInfo
   {
-    uint32_t maxPacketSize;
+    uint16_t maxPacketSize;
   };
 
   SOCKET sock;
   ConnInfo connInfo;
+  std::vector<char> sendBuffer;
 
 public:
   Obex() noexcept : s(INVALID_SOCKET) {}
@@ -150,12 +192,16 @@ public:
   int
   connect() noexcept
   {
-    int ret = obex_connect(this->sock, this->connInfo);
+    ObexConnResp resp;
+    int ret = obex_connect(this->sock, &resp);
 
     if (ret)
       this->sock = INVALID_SOCKET;
 
-    return ret;
+    this->connInfo.maxPacketSize = OBEX_PACK_SIZE(resp.maxSizeH, resp.maxSizeL);
+    sendBuffer.resize(this->connInfo.maxPacketSize);
+    printf("Got max packet size: %hu\n", this->connInfo.maxPacketSize);
+    return 0;
   }
 
   void
@@ -166,6 +212,73 @@ public:
 
     obex_disconnect(this->sock);
   }
+
+  template<typename IntegralType>
+  static std::string_view
+  serialize(IntegralType i)
+  {
+    return std::string_view((char*)&i, sizeof(IntegralType));
+  }
+
+  int
+  put_file(std::string_view filename)
+  {
+    namespace fs = std::filesystem;
+
+    if (this->sock == INVALID_SOCKET) {
+      puts("Tried to send file via invalid socket.");
+      return 1;
+    }
+
+    std::ifstream ifs(filename);
+
+    if (!ifs.is_open())
+      return 1;
+
+    size_t fileSize = fs::file_size(filename.data());
+    size_t packSize = this->connInfo.maxPacketSize;
+    uint16_t total_size = 6 + filename.size() + 1 + 8 + fileSize;
+
+    if (total_size > this->connInfo.maxPacketSize) {
+      puts("Sending that huge files is not yet supported.\n");
+      return 1;
+    }
+
+    std::stringstream ss;
+
+    ss << static_cast<char>(0x82); // FINAL
+    ss << serialize(total_size);
+    ss << static_cast<char>(0x01);
+    ss << serialize(static_cast<uint16_t>(filename.size()+1));
+    ss << filename;
+    ss << static_cast<char>(0x00);
+    ss << static_cast<char>(0xC3);
+    ss << serialize(static_cast<uint32_t>(fileSize));
+    ss << static_cast<char>(0x48);
+    ss << serialize(static_cast<uint32_t>(fileSize));
+    std::copy(std::istream_iterator<char>(file),
+              std::istream_iterator<char>(),
+              std::ostream_iterator<char>(ss));
+
+    std::copy(std::istream_iterator<char>(ss),
+              std::istream_iterator<char>(),
+              std::ostream_iterator<char>(ss));
+
+    SEND_ARRAY(this->sock, ss.str());
+
+    return 0;
+  }
+
+private:
+
+  uint16_t preparePutBuffer(std::string_view filename, size_t file_size) noexcept
+  {
+    uint16_t size = this->connInfo.maxPacketSize;
+    this->sendBuffer[0] = 0x02;
+    this->sendBuffer[1] = size >> 4;
+    this->sendBuffer[2] = size & 0xff;
+  }
+
 };
 
 vector<BLUETOOTH_DEVICE_INFO>
