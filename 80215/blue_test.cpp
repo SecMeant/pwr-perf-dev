@@ -45,7 +45,7 @@ make_array(Ts &&... args)
   return std::array<T, sizeof...(args)>({ static_cast<T>(args)... });
 }
 
-template<typename ContaierType>
+template<typename ContainerType>
 constexpr void
 OBEX_MARK_FINAL(ContainerType&& array)
 {
@@ -251,10 +251,6 @@ public:
     ss << static_cast<char>(0x48);
     ss << serialize(static_cast<uint32_t>(fileSize));
     std::copy(std::istream_iterator<char>(file),
-              std::istream_iterator<char>(),
-              std::ostream_iterator<char>(ss));
-
-    std::copy(std::istream_iterator<char>(ss),
               std::istream_iterator<char>(),
               std::ostream_iterator<char>(ss));
 
