@@ -212,6 +212,7 @@ public:
   static std::string_view
   serialize(IntegralType i)
   {
+    i = OBEX_CONV_SIZE(i);
     return std::string_view((char*)&i, sizeof(IntegralType));
   }
 
