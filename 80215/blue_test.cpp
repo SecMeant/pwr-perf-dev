@@ -21,7 +21,19 @@
 #include <iterator>
 #include <algorithm>
 
-#define OBEX_CONV_SIZE(size) __builtin_bswap16(size)
+template<typename IntegralType>
+constexpr auto OBEX_CONV_SIZE(IntegralType i)
+{
+  if constexpr(sizeof(IntegralType) == 2)
+    return __builtin_bswap16(i);
+  else if constexpr (sizeof(IntegralType) == 4)
+    return __builtin_bswap32(i);
+  else if constexpr (sizeof(IntegralType) == 8)
+    return __builtin_bswap64(i);
+  else
+    static_assert(!sizeof(IntegralType));
+}
+
 #define OBEX_SIZE_HIGH(size) (size >> 4)
 #define OBEX_SIZE_LOW(size) (size & 0xff)
 
@@ -34,7 +46,7 @@ OBEX_PACK_SIZE(uint8_t sh, uint8_t sl)
 }
 
 constexpr uint8_t OBEX_PAYLOAD_PUT_CODE = 0x02;
-constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(0x00ff);
+constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(static_cast<uint16_t>(0x00ff));
 constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
 
 using namespace std;
@@ -90,16 +102,21 @@ ObexConnResp
 obex_fetch_resp(SOCKET s)
 {
   ObexConnResp ret;
-  char buff[OBEX_MAX_PACKET_SIZE];
-  int rec_len = recv(s, buff, OBEX_MAX_PACKET_SIZE, 0);
-  if (rec_len == SOCKET_ERROR || rec_len < 7) {
+  char buff[255];
+  int rec_len = recv(s, buff, 255, 0);
+  if (rec_len == SOCKET_ERROR || rec_len < 3) {
     printf("recv failed with error: %d\n", WSAGetLastError());
     ret.code = OBEX_ERROR_RESP;
   }
 
   char *retp = (char *)&ret;
-  for (size_t i = 0; i < 7; ++i)
+  for (size_t i = 0; i < std::min(7, rec_len); ++i)
     retp[i] = buff[i];
+
+  for (int i = 0; i < rec_len; ++i) {
+    printf("%hhx ", buff[i]);
+  }
+  puts("");
 
   return ret;
 }
@@ -209,7 +226,7 @@ public:
   }
 
   template<typename IntegralType>
-  static std::string_view
+  static auto
   serialize(IntegralType i)
   {
     i = OBEX_CONV_SIZE(i);
@@ -235,7 +252,7 @@ public:
 
     size_t fileSize = fs::file_size(filename);
     size_t packSize = this->connInfo.maxPacketSize;
-    uint16_t total_size = 6 + filename.size() + 1 + 8 + fileSize;
+    uint16_t total_size = 6 + (filename.size()+1)*2 + 1 + 4 + 1 + 2 + fileSize;
 
     if (total_size > this->connInfo.maxPacketSize) {
       puts("Sending that huge files is not yet supported.\n");
@@ -248,13 +265,16 @@ public:
     ss << static_cast<uchar>(0x82); // FINAL
     ss << serialize(total_size);
     ss << static_cast<uchar>(0x01);
-    ss << serialize(static_cast<uint16_t>(filename.size()+1));
-    ss << filename;
+    uint16_t uniFileNameSize = (filename.size()+1)*2;
+    ss << serialize(static_cast<uint16_t>(uniFileNameSize+3));
+    for(auto i = 0; i < filename.size(); ++i)
+      ss << static_cast<uchar>(0x00) << filename[i];
+    ss << static_cast<uchar>(0x00);
     ss << static_cast<uchar>(0x00);
     ss << static_cast<uchar>(0xC3);
-    ss << serialize(static_cast<uint64_t>(fileSize));
-    ss << static_cast<uchar>(0x48);
     ss << serialize(static_cast<uint32_t>(fileSize));
+    ss << static_cast<uchar>(0x48);
+    ss << serialize(static_cast<uint16_t>(fileSize + 3));
     std::copy(std::istream_iterator<uchar>(file),
               std::istream_iterator<uchar>(),
               std::ostream_iterator<uchar>(ss));
@@ -263,8 +283,17 @@ public:
     std::copy(std::istream_iterator<uchar>(ss),
               std::istream_iterator<uchar>(),
               std::ostream_iterator<uint32_t>(ofile, ", "));
-    //SEND_ARRAY(this->sock, ss.str());
+    auto sent_len = SEND_ARRAY(this->sock, ss.str());
 
+    fprintf(stderr, "Sent len: %i\n", sent_len);
+    auto resp = obex_fetch_resp(this->sock);
+    if (resp.code == OBEX_ERROR_RESP) {
+      printf("recv failed with error: %d\n", WSAGetLastError());
+      this->sock = INVALID_SOCKET;
+      return 1;
+    }
+
+    resp.debug_show();
     return 0;
   }
 };
@@ -329,26 +358,14 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
 
   printf("socket() looks fine!\n");
 
-  // Scan all ports -- bthapis feature doesnt seem to work, doing it
-  // manually.
-  constexpr int min_port = 4;
-  constexpr int max_port = 30;
   auto port = 12;
-  while (port <= max_port) {
-    printf("Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr,
-           port);
+  printf("Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr,
+         port);
 
-    SockAddrBthServer.port = port;
+  SockAddrBthServer.port = port;
 
-    if (::connect(s, (SOCKADDR *)&SockAddrBthServer,
-                  sizeof(SOCKADDR_BTH)) != SOCKET_ERROR)
-      break;
-
-    ++port;
-    break;
-  }
-
-  if (port > max_port) {
+  if (::connect(s, (SOCKADDR *)&SockAddrBthServer,
+                sizeof(SOCKADDR_BTH)) == SOCKET_ERROR) {
     printf("connect() failed with error code %d\n", WSAGetLastError());
     ::closesocket(s);
     return INVALID_SOCKET;
