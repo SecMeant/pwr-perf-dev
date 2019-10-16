@@ -429,7 +429,7 @@ _tmain(int argc, _TCHAR *argv[])
   auto sock = bth_connect(pd);
   Obex obex(sock);
   obex.connect();
-  obex.put_file();
+  obex.put_file("a.txt");
   obex.disconnect();
 
   return 0;
