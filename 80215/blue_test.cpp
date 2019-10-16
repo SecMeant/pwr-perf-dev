@@ -1,35 +1,172 @@
-#include <tchar.h>
-#include <string>
-#include <iostream>
-#include <vector>
+#include "bthdef.h"
+#include <BluetoothAPIs.h>
 #include <Winsock2.h>
 #include <Ws2bth.h>
-#include <BluetoothAPIs.h>
-#include "bthdef.h"
-#include <stdio.h>
 #include <initguid.h>
+#include <intsafe.h>
+#include <strsafe.h>
+#include <tchar.h>
 #include <winsock2.h>
 #include <ws2bth.h>
-#include <strsafe.h>
-#include <intsafe.h>
+
 #include <array>
+#include <cstdio>
+#include <iostream>
+#include <string>
+#include <vector>
+
+#include <byteswap.h>
+
+#define OBEX_CONV_SIZE(size) __bswap_16(size)
+#define OBEX_SIZE_HIGH(size) (size >> 4)
+#define OBEX_SIZE_LOW(size) (size & 0xff)
+constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(0x00ff);
+constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
 
 using namespace std;
-template<typename T, typename ...Ts>
-auto make_array(Ts&&... args){
-  return std::array<T, sizeof...(args)>({static_cast<T>(args)...});
+template<typename T, typename... Ts>
+auto
+make_array(Ts &&... args)
+{
+  return std::array<T, sizeof...(args)>({ static_cast<T>(args)... });
 }
 
-auto OBEX_CONNECT_PAYLOAD = make_array<char>( 0x80, 0x00, 0x07, 0x10, 0x00, 0x20, 0x00 );
+auto OBEX_CONNECT_PAYLOAD = make_array<char>(
+  0x80, 0x00, 0x07, 0x10, 0x00, OBEX_SIZE_HIGH(OBEX_MAX_PACKET_SIZE),
+  OBEX_SIZE_LOW(OBEX_MAX_PACKET_SIZE));
 auto OBEX_DISCONNECT_PAYLOAD = make_array<char>(0x81, 0x00, 0x03);
 
-auto OBEX_CONNECT_FTP_PAYLOAD = make_array<char>( 0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C,
-                                   0x11, 0xD2, 0x98, 0x4E, 0x52, 0x54,
-                                   0x00, 0xDC, 0x9E, 0x09 );
+auto OBEX_CONNECT_FTP_PAYLOAD =
+  make_array<char>(0xF9, 0xEC, 0x7B, 0xC4, 0x95, 0x3C, 0x11, 0xD2, 0x98,
+                   0x4E, 0x52, 0x54, 0x00, 0xDC, 0x9E, 0x09);
 
-auto OBEX_PUT_PAYLOAD = make_array<char>( 0x02 );
+auto OBEX_PUT_PAYLOAD = make_array<char>(0x02);
 
-auto RFCOMM_UUID = make_array<char>(0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB);
+auto RFCOMM_UUID =
+  make_array<char>(0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80,
+                   0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB);
+
+struct ObexConnResp
+{
+  uint8_t code;
+  uint8_t lenH;
+  uint8_t lenL;
+  uint8_t ver;
+  uint8_t flags;
+  uint8_t maxSizeH;
+  uint8_t maxSizeL;
+
+  void
+  debug_show() noexcept
+  {
+    printf("Obex resp: %hhx %hhx %hhx %hhx %hhx %hhx %hhx\n", code, lenH,
+           lenL, ver, flags, maxSizeH, maxSizeL);
+  }
+};
+
+ObexConnResp
+obex_fetch_resp(SOCKET s)
+{
+  ObexConnResp ret;
+  char buff[OBEX_MAX_PACKET_SIZE];
+  int rec_len = recv(s, buff, OBEX_MAX_PACKET_SIZE, 0);
+  if (rec_len == SOCKET_ERROR || rec_len < 7) {
+    printf("recv failed with error: %d\n", WSAGetLastError());
+    ret.code = OBEX_ERROR_RESP;
+  }
+
+  char *retp = (char *)&ret;
+  for (size_t i = 0; i < 7; ++i)
+    retp[i] = buff[i];
+
+  return ret;
+}
+
+int
+obex_connect(SOCKET s, ObexConnResp &resp)
+{
+  printf("Sending msg\n");
+  int send_len = SEND_ARRAY(s, OBEX_CONNECT_PAYLOAD);
+  if (send_len == SOCKET_ERROR) {
+    printf("send failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return 1;
+  }
+
+  printf("send len %i\n", send_len);
+
+  resp = obex_fetch_resp(s);
+  if (resp.code == OBEX_ERROR_RESP) {
+    printf("recv failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return 1;
+  }
+
+  resp.debug_show();
+  return 0;
+}
+
+void
+obex_disconnect(SOCKET s)
+{
+  printf("Sending disconnect\n");
+  int send_len = SEND_ARRAY(s, OBEX_DISCONNECT_PAYLOAD);
+  if (send_len == SOCKET_ERROR) {
+    printf("send failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return;
+  }
+
+  printf("send len %i\n", send_len);
+
+  auto resp = obex_fetch_resp(s);
+  if (resp.code == OBEX_ERROR_RESP) {
+    printf("recv failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return 1;
+  }
+
+  resp.debug_show();
+  closesocket(s);
+}
+
+class Obex
+{
+  struct ConnInfo
+  {
+    uint32_t maxPacketSize;
+  };
+
+  SOCKET sock;
+  ConnInfo connInfo;
+
+public:
+  Obex() noexcept : s(INVALID_SOCKET) {}
+
+  Obex(SOCKET s) noexcept : s(INVALID_SOCKET) {}
+
+  ~Obex() { this->disconnect(); }
+
+  int
+  connect() noexcept
+  {
+    int ret = obex_connect(this->sock, this->connInfo);
+
+    if (ret)
+      this->sock = INVALID_SOCKET;
+
+    return ret;
+  }
+
+  void
+  disconnect() noexcept
+  {
+    if (this->sock == INVALID_SOCKET)
+      returm;
+
+    obex_disconnect(this->sock);
+  }
+};
 
 vector<BLUETOOTH_DEVICE_INFO>
 scanDevices()
@@ -97,13 +234,12 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
   constexpr int max_port = 30;
   auto port = 12;
   while (port <= max_port) {
-    printf(
-      "Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr, port);
+    printf("Conneecting to device : %llx:%i\n", SockAddrBthServer.btAddr,
+           port);
 
     SockAddrBthServer.port = port;
 
-    if (::connect(s,
-                  (SOCKADDR *)&SockAddrBthServer,
+    if (::connect(s, (SOCKADDR *)&SockAddrBthServer,
                   sizeof(SOCKADDR_BTH)) != SOCKET_ERROR)
       break;
 
@@ -120,84 +256,7 @@ bth_connect(BLUETOOTH_DEVICE_INFO &device)
   return s;
 }
 
-#define SEND_ARRAY(sock, arr) \
-  send(sock, arr.data(), arr.size(), 0)
-
-int
-obex_connect(SOCKET s)
-{
-  printf("Sending msg\n");
-  int send_len = SEND_ARRAY(s, OBEX_CONNECT_PAYLOAD);
-  if (send_len == SOCKET_ERROR) {
-    printf("send failed with error: %d\n", WSAGetLastError());
-    closesocket(s);
-    return 1;
-  }
-
-  // printf("Sending msg\n");
-  // send_len = SEND_ARRAY(s, OBEX_PUT_PAYLOAD);
-  // if ( send_len == SOCKET_ERROR) {
-  //     printf("send failed with error: %d\n", WSAGetLastError());
-  //     closesocket(s);
-  //     return 1;
-  // }
-
-  printf("send len %i\n", send_len);
-  printf("recv\n");
-  char buff[256];
-  int rec_len = recv(s, buff, 256, 0);
-  if (rec_len == SOCKET_ERROR) {
-    printf("recv failed with error: %d\n", WSAGetLastError());
-    closesocket(s);
-    return 1;
-  }
-
-  printf("recv  data %i \n", rec_len);
-  for (int i = 0; i < rec_len; i++) {
-    printf("%hhx ", buff[i]);
-  }
-  puts("");
-
-  return 0;
-}
-
-int
-obex_disconnect(SOCKET s)
-{
-  printf("Sending disconnect\n");
-  int send_len = SEND_ARRAY(s, OBEX_DISCONNECT_PAYLOAD);
-  if (send_len == SOCKET_ERROR) {
-    printf("send failed with error: %d\n", WSAGetLastError());
-    closesocket(s);
-    return 1;
-  }
-
-  // printf("Sending msg\n");
-  // send_len = SEND_ARRAY(s, OBEX_PUT_PAYLOAD);
-  // if ( send_len == SOCKET_ERROR) {
-  //     printf("send failed with error: %d\n", WSAGetLastError());
-  //     closesocket(s);
-  //     return 1;
-  // }
-
-  printf("send len %i\n", send_len);
-  printf("recv\n");
-  char buff[256];
-  int rec_len = recv(s, buff, 256, 0);
-  if (rec_len == SOCKET_ERROR) {
-    printf("recv failed with error: %d\n", WSAGetLastError());
-    closesocket(s);
-    return 1;
-  }
-
-  printf("recv  data %i \n", rec_len);
-  for (int i = 0; i < rec_len; i++) {
-    printf("%hhx ", buff[i]);
-  }
-  puts("");
-
-  return 0;
-}
+#define SEND_ARRAY(sock, arr) send(sock, arr.data(), arr.size(), 0)
 
 int
 pairDevice(BLUETOOTH_DEVICE_INFO &device)
@@ -205,16 +264,14 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
 
   HBLUETOOTH_AUTHENTICATION_REGISTRATION hCallbackHandle = 0;
   DWORD result = BluetoothRegisterForAuthenticationEx(
-    &device,
-    &hCallbackHandle,
-    (PFN_AUTHENTICATION_CALLBACK_EX)&bluetoothAuthCallback,
-    NULL);
+    &device, &hCallbackHandle,
+    (PFN_AUTHENTICATION_CALLBACK_EX)&bluetoothAuthCallback, NULL);
   if (result != ERROR_SUCCESS) {
     puts("Failed to register callback");
     return 1;
   }
-  result = BluetoothAuthenticateDeviceEx(
-    NULL, NULL, &device, NULL, MITMProtectionNotRequired);
+  result = BluetoothAuthenticateDeviceEx(NULL, NULL, &device, NULL,
+                                         MITMProtectionNotRequired);
 
   BluetoothUnregisterAuthentication(hCallbackHandle);
   switch (result) {
@@ -235,7 +292,6 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
 
   return 1;
 }
-
 
 int
 _tmain(int argc, _TCHAR *argv[])
@@ -275,7 +331,9 @@ _tmain(int argc, _TCHAR *argv[])
   }
 
   auto sock = bth_connect(pd);
-  obex_connect(sock);
-  obex_disconnect(sock);
+  Obex obex(sock);
+  obex.connect();
+  obex.disconnect();
+
   return 0;
 }
