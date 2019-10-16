@@ -224,9 +224,9 @@ public:
       return 1;
     }
 
-    std::ifstream ifs(filename);
+    std::ifstream file(filename);
 
-    if (!ifs.is_open())
+    if (!file.is_open())
       return 1;
 
     size_t fileSize = fs::file_size(filename.data());
