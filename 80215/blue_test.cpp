@@ -21,6 +21,17 @@
 #include <iterator>
 #include <algorithm>
 
+#define OBEX_SIZE_HIGH(size) (size >> 4)
+#define OBEX_SIZE_LOW(size) (size & 0xff)
+
+#define SEND_ARRAY(sock, arr) send(sock, arr.data(), arr.size(), 0)
+
+using uchar = unsigned char;
+
+constexpr uint8_t OBEX_PAYLOAD_PUT_CODE = 0x02;
+constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(static_cast<uint16_t>(0x00ff));
+constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
+
 template<typename IntegralType>
 constexpr auto OBEX_CONV_SIZE(IntegralType i)
 {
@@ -34,34 +45,17 @@ constexpr auto OBEX_CONV_SIZE(IntegralType i)
     static_assert(!sizeof(IntegralType));
 }
 
-#define OBEX_SIZE_HIGH(size) (size >> 4)
-#define OBEX_SIZE_LOW(size) (size & 0xff)
-
-#define SEND_ARRAY(sock, arr) send(sock, arr.data(), arr.size(), 0)
-
 constexpr uint16_t
 OBEX_PACK_SIZE(uint8_t sh, uint8_t sl)
 {
   return (static_cast<uint16_t>(sh) << 4) | sl;
 }
 
-constexpr uint8_t OBEX_PAYLOAD_PUT_CODE = 0x02;
-constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(static_cast<uint16_t>(0x00ff));
-constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
-
-using namespace std;
 template<typename T, typename... Ts>
 auto
 make_array(Ts &&... args)
 {
   return std::array<T, sizeof...(args)>({ static_cast<T>(args)... });
-}
-
-template<typename ContainerType>
-constexpr void
-OBEX_MARK_FINAL(ContainerType&& array)
-{
-  array[0] |= 0x80;
 }
 
 auto OBEX_CONNECT_PAYLOAD = make_array<char>(
@@ -136,9 +130,18 @@ obex_connect(SOCKET s, ObexConnResp &resp)
   printf("send len %i\n", send_len);
 
   resp = obex_fetch_resp(s);
+
   if (resp.code == OBEX_ERROR_RESP) {
     printf("recv failed with error: %d\n", WSAGetLastError());
     closesocket(s);
+    return 1;
+  }
+
+  uint16_t max_packet_size = ( static_cast<uint16_t>(resp.lenH) << 8 ) | static_cast<uint16_t>(resp.lenL);
+
+  if (max_packet_size <= 3) {
+    printf("Client declared max packet size less than 3. Aborting.");
+    obex_disconnect(s);
     return 1;
   }
 
@@ -261,7 +264,6 @@ public:
 
     std::stringstream ss;
 
-    using uchar = unsigned char;
     ss << static_cast<uchar>(0x82); // FINAL
     ss << serialize(total_size);
     ss << static_cast<uchar>(0x01);
@@ -275,14 +277,17 @@ public:
     ss << serialize(static_cast<uint32_t>(fileSize));
     ss << static_cast<uchar>(0x48);
     ss << serialize(static_cast<uint16_t>(fileSize + 3));
+
     std::copy(std::istream_iterator<uchar>(file),
               std::istream_iterator<uchar>(),
               std::ostream_iterator<uchar>(ss));
 
 
-    std::copy(std::istream_iterator<uchar>(ss),
-              std::istream_iterator<uchar>(),
-              std::ostream_iterator<uint32_t>(ofile, ", "));
+    // DEBUG
+    //std::copy(std::istream_iterator<uchar>(ss),
+    //          std::istream_iterator<uchar>(),
+    //          std::ostream_iterator<uint32_t>(ofile, ", "));
+
     auto sent_len = SEND_ARRAY(this->sock, ss.str());
 
     fprintf(stderr, "Sent len: %i\n", sent_len);
@@ -431,7 +436,7 @@ _tmain(int argc, _TCHAR *argv[])
     printf("%i: %S\n", i++, devices.szName);
   }
 
-  puts("Delect device: ");
+  puts("Select device: ");
   uint32_t devid;
   if (scanf(" %i", &devid) != 1 || devid >= devices.size()) {
     cout << "Wrong device number\n";
