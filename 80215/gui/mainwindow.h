@@ -34,7 +34,7 @@ struct BluetoothDevInfo
   {
     QString addr = QString::number(nativeInfo.Address.rgBytes[0], 16);
     for(size_t i = 1; i < sizeof(nativeInfo.Address.rgBytes); ++i)
-      addr += ":" + QString::number(nativeInfo.Address.rgBytes[i]);
+      addr += ":" + QString::number(nativeInfo.Address.rgBytes[i], 16);
 
     this->addr = addr;
   }
