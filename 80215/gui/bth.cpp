@@ -11,7 +11,7 @@
 
 #include <array>
 #include <cstdio>
-#include <filesystem>
+#include <experimental/filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -21,16 +21,14 @@
 #include <iterator>
 #include <algorithm>
 
+#include "bth.h"
+
 #define OBEX_SIZE_HIGH(size) (size >> 4)
 #define OBEX_SIZE_LOW(size) (size & 0xff)
 
 #define SEND_ARRAY(sock, arr) send(sock, arr.data(), arr.size(), 0)
 
 using uchar = unsigned char;
-
-constexpr uint8_t OBEX_PAYLOAD_PUT_CODE = 0x02;
-constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(static_cast<uint16_t>(0x00ff));
-constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
 
 template<typename IntegralType>
 constexpr auto OBEX_CONV_SIZE(IntegralType i)
@@ -43,6 +41,18 @@ constexpr auto OBEX_CONV_SIZE(IntegralType i)
     return __builtin_bswap64(i);
   else
     static_assert(!sizeof(IntegralType));
+}
+
+constexpr uint8_t OBEX_PAYLOAD_PUT_CODE = 0x02;
+constexpr uint16_t OBEX_MAX_PACKET_SIZE = OBEX_CONV_SIZE(static_cast<uint16_t>(0x00ff));
+constexpr uint8_t OBEX_ERROR_RESP = 0xFF;
+
+template<typename IntegralType>
+auto
+serialize(IntegralType i)
+{
+  i = OBEX_CONV_SIZE(i);
+  return std::string_view((char*)&i, sizeof(IntegralType));
 }
 
 constexpr uint16_t
@@ -104,7 +114,7 @@ obex_fetch_resp(SOCKET s)
   }
 
   char *retp = (char *)&ret;
-  for (size_t i = 0; i < std::min(7, rec_len); ++i)
+  for (int i = 0; i < std::min(7, rec_len); ++i)
     retp[i] = buff[i];
 
   for (int i = 0; i < rec_len; ++i) {
@@ -115,11 +125,36 @@ obex_fetch_resp(SOCKET s)
   return ret;
 }
 
+void
+obex_disconnect(SOCKET s)
+{
+  printf("Sending disconnect\n");
+  int send_len = SEND_ARRAY(s, OBEX_DISCONNECT_PAYLOAD);
+  if (send_len == SOCKET_ERROR) {
+    printf("send failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return;
+  }
+
+  printf("send len %i\n", send_len);
+
+  auto resp = obex_fetch_resp(s);
+  if (resp.code == OBEX_ERROR_RESP) {
+    printf("recv failed with error: %d\n", WSAGetLastError());
+    closesocket(s);
+    return;
+  }
+
+  resp.debug_show();
+  closesocket(s);
+}
+
+
 // TODO reject packets that declare max_packet_size < 3
 int
 obex_connect(SOCKET s, ObexConnResp &resp)
 {
-  printf("Sending msg\n");
+  printf("Sending msg %lu\n", OBEX_CONNECT_PAYLOAD.size());
   int send_len = SEND_ARRAY(s, OBEX_CONNECT_PAYLOAD);
   if (send_len == SOCKET_ERROR) {
     printf("send failed with error: %d\n", WSAGetLastError());
@@ -149,30 +184,6 @@ obex_connect(SOCKET s, ObexConnResp &resp)
   return 0;
 }
 
-void
-obex_disconnect(SOCKET s)
-{
-  printf("Sending disconnect\n");
-  int send_len = SEND_ARRAY(s, OBEX_DISCONNECT_PAYLOAD);
-  if (send_len == SOCKET_ERROR) {
-    printf("send failed with error: %d\n", WSAGetLastError());
-    closesocket(s);
-    return;
-  }
-
-  printf("send len %i\n", send_len);
-
-  auto resp = obex_fetch_resp(s);
-  if (resp.code == OBEX_ERROR_RESP) {
-    printf("recv failed with error: %d\n", WSAGetLastError());
-    closesocket(s);
-    return;
-  }
-
-  resp.debug_show();
-  closesocket(s);
-}
-
 int
 obex_end_of_put(SOCKET s)
 {
@@ -185,128 +196,103 @@ obex_end_of_put(SOCKET s)
   return 0;
 }
 
-class Obex
+
+int
+Obex::connect() noexcept
 {
-  struct ConnInfo
-  {
-    uint16_t maxPacketSize;
-  };
+  ObexConnResp resp;
+  int ret = obex_connect(this->sock, resp);
 
-  SOCKET sock;
-  ConnInfo connInfo;
-  std::vector<char> sendBuffer;
-
-public:
-  Obex() noexcept : sock(INVALID_SOCKET) {}
-
-  Obex(SOCKET s) noexcept : sock(s) {}
-
-  ~Obex() { this->disconnect(); }
-
-  int
-  connect() noexcept
-  {
-    ObexConnResp resp;
-    int ret = obex_connect(this->sock, resp);
-
-    if (ret)
-      this->sock = INVALID_SOCKET;
-
-    this->connInfo.maxPacketSize = OBEX_PACK_SIZE(resp.maxSizeH, resp.maxSizeL);
-    sendBuffer.resize(this->connInfo.maxPacketSize);
-    printf("Got max packet size: %hu\n", this->connInfo.maxPacketSize);
-    return 0;
-  }
-
-  void
-  disconnect() noexcept
-  {
-    if (this->sock == INVALID_SOCKET)
-      return;
-
-    obex_disconnect(this->sock);
+  if (ret)
     this->sock = INVALID_SOCKET;
+
+  this->connInfo.maxPacketSize = OBEX_PACK_SIZE(resp.maxSizeH, resp.maxSizeL);
+  sendBuffer.resize(this->connInfo.maxPacketSize);
+  printf("Got max packet size: %hu\n", this->connInfo.maxPacketSize);
+  return 0;
+}
+
+void
+Obex::disconnect() noexcept
+{
+  if (this->sock == INVALID_SOCKET)
+    return;
+
+  obex_disconnect(this->sock);
+  this->sock = INVALID_SOCKET;
+}
+
+
+int
+Obex::put_file(std::string_view filename)
+{
+  namespace fs = std::experimental::filesystem;
+
+  if (this->sock == INVALID_SOCKET) {
+    puts("Tried to send file via invalid socket.");
+    return 1;
   }
 
-  template<typename IntegralType>
-  static auto
-  serialize(IntegralType i)
-  {
-    i = OBEX_CONV_SIZE(i);
-    return std::string_view((char*)&i, sizeof(IntegralType));
+  std::ifstream file(filename.data());
+  std::ofstream ofile("outdata.txt");
+  ofile << std::hex;
+
+  if (!file.is_open())
+    return 1;
+
+  size_t fileSize = fs::file_size(filename);
+  size_t packSize = this->connInfo.maxPacketSize;
+  uint16_t total_size = 6 + (filename.size()+1)*2 + 1 + 4 + 1 + 2 + fileSize;
+
+  if (total_size > this->connInfo.maxPacketSize) {
+    puts("Sending that huge files is not yet supported.\n");
+    return 1;
   }
 
-  int
-  put_file(std::string_view filename)
-  {
-    namespace fs = std::filesystem;
+  std::stringstream ss;
 
-    if (this->sock == INVALID_SOCKET) {
-      puts("Tried to send file via invalid socket.");
-      return 1;
-    }
+  ss << static_cast<uchar>(0x82); // FINAL
+  ss << serialize(total_size);
+  ss << static_cast<uchar>(0x01);
+  uint16_t uniFileNameSize = (filename.size()+1)*2;
+  ss << serialize(static_cast<uint16_t>(uniFileNameSize+3));
+  for(size_t i = 0; i < filename.size(); ++i)
+    ss << static_cast<uchar>(0x00) << filename[i]; // Unicode string 0x00XX
+  ss << static_cast<uchar>(0x00); // Unicode null terminator
+  ss << static_cast<uchar>(0x00);
+  ss << static_cast<uchar>(0xC3);
+  ss << serialize(static_cast<uint32_t>(fileSize));
+  ss << static_cast<uchar>(0x48);
+  ss << serialize(static_cast<uint16_t>(fileSize + 3));
 
-    std::ifstream file(filename.data());
-    std::ofstream ofile("outdata.txt");
-    ofile << std::hex;
-
-    if (!file.is_open())
-      return 1;
-
-    size_t fileSize = fs::file_size(filename);
-    size_t packSize = this->connInfo.maxPacketSize;
-    uint16_t total_size = 6 + (filename.size()+1)*2 + 1 + 4 + 1 + 2 + fileSize;
-
-    if (total_size > this->connInfo.maxPacketSize) {
-      puts("Sending that huge files is not yet supported.\n");
-      return 1;
-    }
-
-    std::stringstream ss;
-
-    ss << static_cast<uchar>(0x82); // FINAL
-    ss << serialize(total_size);
-    ss << static_cast<uchar>(0x01);
-    uint16_t uniFileNameSize = (filename.size()+1)*2;
-    ss << serialize(static_cast<uint16_t>(uniFileNameSize+3));
-    for(auto i = 0; i < filename.size(); ++i)
-      ss << static_cast<uchar>(0x00) << filename[i];
-    ss << static_cast<uchar>(0x00);
-    ss << static_cast<uchar>(0x00);
-    ss << static_cast<uchar>(0xC3);
-    ss << serialize(static_cast<uint32_t>(fileSize));
-    ss << static_cast<uchar>(0x48);
-    ss << serialize(static_cast<uint16_t>(fileSize + 3));
-
-    std::copy(std::istream_iterator<uchar>(file),
-              std::istream_iterator<uchar>(),
-              std::ostream_iterator<uchar>(ss));
+  std::copy(std::istream_iterator<uchar>(file),
+            std::istream_iterator<uchar>(),
+            std::ostream_iterator<uchar>(ss));
 
 
-    // DEBUG
-    //std::copy(std::istream_iterator<uchar>(ss),
-    //          std::istream_iterator<uchar>(),
-    //          std::ostream_iterator<uint32_t>(ofile, ", "));
+  // DEBUG
+  //std::copy(std::istream_iterator<uchar>(ss),
+  //          std::istream_iterator<uchar>(),
+  //          std::ostream_iterator<uint32_t>(ofile, ", "));
 
-    auto sent_len = SEND_ARRAY(this->sock, ss.str());
+  auto sent_len = SEND_ARRAY(this->sock, ss.str());
 
-    fprintf(stderr, "Sent len: %i\n", sent_len);
-    auto resp = obex_fetch_resp(this->sock);
-    if (resp.code == OBEX_ERROR_RESP) {
-      printf("recv failed with error: %d\n", WSAGetLastError());
-      this->sock = INVALID_SOCKET;
-      return 1;
-    }
-
-    resp.debug_show();
-    return 0;
+  fprintf(stderr, "Sent len: %i\n", sent_len);
+  auto resp = obex_fetch_resp(this->sock);
+  if (resp.code == OBEX_ERROR_RESP) {
+    printf("recv failed with error: %d\n", WSAGetLastError());
+    this->sock = INVALID_SOCKET;
+    return 1;
   }
-};
 
-vector<BLUETOOTH_DEVICE_INFO>
+  resp.debug_show();
+  return 0;
+}
+
+std::vector<BLUETOOTH_DEVICE_INFO>
 scanDevices()
 {
-  vector<BLUETOOTH_DEVICE_INFO> res;
+  std::vector<BLUETOOTH_DEVICE_INFO> res;
 
   BLUETOOTH_DEVICE_SEARCH_PARAMS bdsp;
   BLUETOOTH_DEVICE_INFO bdi;
@@ -407,7 +393,7 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
       puts("pair device failed, invalid parameter");
       break;
     default:
-      printf("pair device failed, unknown error, code %u\n", result);
+      printf("pair device failed, unknown error, code %lu\n", result);
       break;
   }
 
@@ -415,7 +401,19 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
 }
 
 int
-_tmain(int argc, _TCHAR *argv[])
+initWINAPI()
+{
+  WSADATA wsaData;
+
+  if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+    return 1;
+  }
+
+  return 0;
+}
+
+int
+test([[maybe_unsued]] int argc, [[maybe_unused]] _TCHAR *argv[])
 {
   WSADATA wsaData;
 
@@ -439,13 +437,13 @@ _tmain(int argc, _TCHAR *argv[])
   puts("Select device: ");
   uint32_t devid;
   if (scanf(" %i", &devid) != 1 || devid >= devices.size()) {
-    cout << "Wrong device number\n";
+    puts("Wrong device number");
     WSACleanup();
     return 1;
   }
 
   auto pd = devices[devid];
-  cout << "Device pairing...\n";
+  puts("Device pairing...\n");
   if (pairDevice(pd)) {
     WSACleanup();
     return 1;
