@@ -6,6 +6,8 @@
 #include <thread>
 #include <chrono>
 
+#include <QFileDialog>
+
 MainWindow::MainWindow(QWidget *parent) :
   QMainWindow(parent),
   ui(new Ui::MainWindow)
@@ -13,11 +15,14 @@ MainWindow::MainWindow(QWidget *parent) :
   this->ui->setupUi(this);
   connect(this->ui->ScanButton, SIGNAL(released()),this,SLOT(scan()));
   connect(this->ui->PairButton, SIGNAL(released()),this,SLOT(pairDevice()));
+  connect(this->ui->PickFileButton, SIGNAL(released()),this,SLOT(pickFile()));
+  connect(this->ui->SendButton, SIGNAL(released()),this,SLOT(sendFile()));
   connect(this->ui->DeviceList, SIGNAL(itemClicked(QListWidgetItem*)),this,SLOT(deviceSelected(QListWidgetItem *)));
 }
 
 MainWindow::~MainWindow()
 {
+  this->device.disconnect();
   delete ui;
 }
 
@@ -55,6 +60,20 @@ void MainWindow::pairDevice() noexcept
   }
 
   this->setWindowTitle("Paired.");
+
+  this->device = Obex(bth_connect(dev.nativeInfo));
+  this->device.connect();
+}
+
+void MainWindow::pickFile() noexcept
+{
+  this->filename = QFileDialog::getOpenFileName(this);
+  this->setWindowTitle(QString("Selected file %1").arg(filename));
+}
+
+void MainWindow::sendFile() noexcept
+{
+  this->device.put_file(this->filename.toStdString());
 }
 
 void MainWindow::deviceSelected(QListWidgetItem *item) const noexcept
@@ -63,7 +82,7 @@ void MainWindow::deviceSelected(QListWidgetItem *item) const noexcept
 
   this->ui->DevNameF->setText(item->text());
   this->ui->DevAddrF->setText(dev.addr);
-  this->ui->DevPairF->setText(dev.nativeInfo.fConnected ? "True" : "False");
+  this->ui->DevPairF->setText(dev.nativeInfo.fAuthenticated ? "True" : "False");
 }
 
 void MainWindow::changeButtonsState(bool state) noexcept

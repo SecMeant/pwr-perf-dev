@@ -17,6 +17,30 @@ class Obex
 public:
   Obex() noexcept : sock(INVALID_SOCKET) {}
 
+  Obex(const Obex &other) = delete;
+  Obex& operator=(const Obex &other) = delete;
+
+  Obex(Obex &&other)
+  :sock(other.sock), connInfo(other.connInfo),
+  sendBuffer(std::move(other.sendBuffer))
+  {
+    other.sock = INVALID_SOCKET;
+  }
+
+  Obex& operator=(Obex &&other)
+  {
+    if (this == &other)
+      return *this;
+
+    sock = other.sock;
+    connInfo = other.connInfo;
+    sendBuffer = std::move(other.sendBuffer);
+
+    other.sock = INVALID_SOCKET;
+
+    return *this;
+  }
+
   Obex(SOCKET s) noexcept : sock(s) {}
 
   ~Obex() { this->disconnect(); }
@@ -26,7 +50,6 @@ public:
 
   void
   disconnect() noexcept;
-
 
   int
   put_file(std::string_view filename);

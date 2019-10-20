@@ -11,12 +11,15 @@
 #include <QString>
 #include <map>
 
+#include "bth.h"
+
 namespace Ui {
   class MainWindow;
 }
 
 std::vector<BLUETOOTH_DEVICE_INFO> scanDevices();
 int pairDevice(BLUETOOTH_DEVICE_INFO &device);
+SOCKET bth_connect(BLUETOOTH_DEVICE_INFO &device);
 
 struct BluetoothDevInfo
 {
@@ -48,14 +51,18 @@ public:
 private:
   Ui::MainWindow *ui;
   std::map<QString, BluetoothDevInfo> devInfo;
+  QString filename;
+  Obex device;
 
 private slots:
   void scan() noexcept;
+  void pairDevice() noexcept;
+  void pickFile() noexcept;
+  void sendFile() noexcept;
   void deviceSelected(QListWidgetItem *item) const noexcept;
 
 private:
   void changeButtonsState(bool state) noexcept;
-  void pairDevice() noexcept;
 
   inline void disableButtons() noexcept
   {changeButtonsState(false);}
