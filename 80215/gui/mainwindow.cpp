@@ -12,6 +12,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
   this->ui->setupUi(this);
   connect(this->ui->ScanButton, SIGNAL(released()),this,SLOT(scan()));
+  connect(this->ui->PairButton, SIGNAL(released()),this,SLOT(pairDevice()));
   connect(this->ui->DeviceList, SIGNAL(itemClicked(QListWidgetItem*)),this,SLOT(deviceSelected(QListWidgetItem *)));
 }
 
@@ -36,6 +37,24 @@ void MainWindow::scan() noexcept
 
   this->setWindowTitle("Done.");
   this->enableButtons();
+}
+
+void MainWindow::pairDevice() noexcept
+{
+  const auto& devName = this->ui->DevNameF->text();
+  if (devName == "") {
+    this->setWindowTitle("Select device from list first.");
+    return;
+  }
+
+  auto& dev = this->devInfo[devName];
+  this->setWindowTitle("Pairing with device . . .");
+  if(::pairDevice(dev.nativeInfo)) {
+     this->setWindowTitle("Failed to pair with device.");
+     return;
+  }
+
+  this->setWindowTitle("Paired.");
 }
 
 void MainWindow::deviceSelected(QListWidgetItem *item) const noexcept

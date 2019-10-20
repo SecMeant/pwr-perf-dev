@@ -15,8 +15,8 @@ namespace Ui {
   class MainWindow;
 }
 
-std::vector<BLUETOOTH_DEVICE_INFO>
-scanDevices();
+std::vector<BLUETOOTH_DEVICE_INFO> scanDevices();
+int pairDevice(BLUETOOTH_DEVICE_INFO &device);
 
 struct BluetoothDevInfo
 {
@@ -55,6 +55,7 @@ private slots:
 
 private:
   void changeButtonsState(bool state) noexcept;
+  void pairDevice() noexcept;
 
   inline void disableButtons() noexcept
   {changeButtonsState(false);}

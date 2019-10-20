@@ -401,6 +401,18 @@ pairDevice(BLUETOOTH_DEVICE_INFO &device)
 }
 
 int
+initWINAPI()
+{
+  WSADATA wsaData;
+
+  if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+    return 1;
+  }
+
+  return 0;
+}
+
+int
 test([[maybe_unsued]] int argc, [[maybe_unused]] _TCHAR *argv[])
 {
   WSADATA wsaData;

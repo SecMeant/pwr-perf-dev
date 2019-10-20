@@ -1,7 +1,7 @@
 #pragma once
 
-std::vector<BLUETOOTH_DEVICE_INFO>
-scanDevices();
+std::vector<BLUETOOTH_DEVICE_INFO> scanDevices();
+int initWINAPI();
 
 class Obex
 {
