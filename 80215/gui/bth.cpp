@@ -154,7 +154,7 @@ obex_disconnect(SOCKET s)
 int
 obex_connect(SOCKET s, ObexConnResp &resp)
 {
-  printf("Sending msg\n");
+  printf("Sending msg %lu\n", OBEX_CONNECT_PAYLOAD.size());
   int send_len = SEND_ARRAY(s, OBEX_CONNECT_PAYLOAD);
   if (send_len == SOCKET_ERROR) {
     printf("send failed with error: %d\n", WSAGetLastError());

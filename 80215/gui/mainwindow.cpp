@@ -60,9 +60,6 @@ void MainWindow::pairDevice() noexcept
   }
 
   this->setWindowTitle("Paired.");
-
-  this->device = Obex(bth_connect(dev.nativeInfo));
-  this->device.connect();
 }
 
 void MainWindow::pickFile() noexcept
@@ -73,7 +70,17 @@ void MainWindow::pickFile() noexcept
 
 void MainWindow::sendFile() noexcept
 {
-  this->device.put_file(this->filename.toStdString());
+  const auto& devName = this->ui->DevNameF->text();
+  if (devName == "") {
+    this->setWindowTitle("Select device from list first.");
+    return;
+  }
+
+  auto& dev = this->devInfo[devName];
+
+  Obex obex(bth_connect(dev.nativeInfo));
+  obex.connect();
+  obex.put_file(this->filename.toStdString());
 }
 
 void MainWindow::deviceSelected(QListWidgetItem *item) const noexcept
