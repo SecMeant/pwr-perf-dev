@@ -12,7 +12,6 @@
 #include <limits>
 #include <intrin.h>
 
-
 #pragma comment(lib, "vfw32")
 
 #define MAX_LOADSTRING 100
@@ -76,6 +75,23 @@ void videofiler_grayscale(uint8_t *data, size_t size)
 	}
 }
 
+void applybrightness(uint8_t *data, size_t size)
+{
+	auto brightness_local = brightness.load(std::memory_order::memory_order_relaxed);
+	for (SIZE_T i = 0; i < size; i += 4)
+	{
+		pixel_t& v = data[i + 0];
+		pixel_t& y1 = data[i + 1];
+		pixel_t& u = data[i + 2];
+		pixel_t& y0 = data[i + 3];
+
+		pixel_t delta = 3 * brightness_local;
+
+		uaddsat(v, delta);
+		uaddsat(u, delta);
+	}
+}
+
 LRESULT videoFilter(
 	HWND hWnd,
 	LPVIDEOHDR lpVHdr
@@ -90,19 +106,7 @@ LRESULT videoFilter(
 		return 0;
 	}
 
-	auto brightness_local = brightness.load(std::memory_order::memory_order_relaxed);
-	for (SIZE_T i = 0; i < pixel_count; i+=4)
-	{
-		pixel_t& v  = pixel[i + 0];
-		pixel_t& y1 = pixel[i + 1];
-		pixel_t& u  = pixel[i + 2];
-		pixel_t& y0 = pixel[i + 3];
-
-		pixel_t delta = 3 * brightness_local;
-
-		uaddsat(v, delta);
-		uaddsat(u, delta);
-	}
+	applybrightness(pixel, pixel_count);
 
 	return 0;
 }
