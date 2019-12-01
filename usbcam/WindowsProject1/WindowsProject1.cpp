@@ -61,7 +61,21 @@ constexpr auto uaddsat(T& t1, T& t2)
 	return t1;
 }
 
-void videofiler_grayscale(uint8_t *data, size_t size)
+void magic(uint8_t *data, size_t size)
+{
+	for (size_t i = 0; i < size; i += 4)
+	{
+		pixel_t& v = data[i + 0];
+		pixel_t& y1 = data[i + 1];
+		pixel_t& u = data[i + 2];
+		pixel_t& y0 = data[i + 3];
+
+		y1 = 0x80;
+		y0 = 0x80;
+	}
+}
+
+void videofilter_grayscale(uint8_t *data, size_t size)
 {
 	for (size_t i = 0; i < size; i += 4)
 	{
@@ -102,11 +116,10 @@ LRESULT videoFilter(
 	SIZE_T pixel_count = img_meta->dwBytesUsed / sizeof(pixel_t);
 
 	if (gray_scale) {
-		videofiler_grayscale(pixel, pixel_count);
-		return 0;
+		videofilter_grayscale(pixel, pixel_count);
 	}
 
-	applybrightness(pixel, pixel_count);
+	magic(pixel, pixel_count);
 
 	return 0;
 }
