@@ -119,7 +119,7 @@ LRESULT videoFilter(
 		videofilter_grayscale(pixel, pixel_count);
 	}
 
-	magic(pixel, pixel_count);
+	applybrightness(pixel, pixel_count);
 
 	return 0;
 }
